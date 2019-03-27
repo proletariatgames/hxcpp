@@ -13,14 +13,18 @@ namespace hx
 extern bool gEnableJit;
 inline void EnableJit(bool inEnable) { gEnableJit = inEnable; }
 
+#define HXCPP_CPPIA_SUPER_ARG(x) , (x)
 
 struct ScriptNamedFunction : public ScriptFunction
 {
-   ScriptNamedFunction(const char *inName,StackExecute inExe,const char *inSig, bool inIsStatic=false)
-      : ScriptFunction(inExe, inSig), name(inName), isStatic(inIsStatic) { }
+   ScriptNamedFunction(const ScriptFunction &s) : ScriptFunction(s), name(0), isStatic(false), superExecute(0) { }
+
+   ScriptNamedFunction(const char *inName=0,StackExecute inExe=0,const char *inSig=0, bool inIsStatic=false, StackExecute superExecute=0)
+      : ScriptFunction(inExe, inSig), name(inName), isStatic(inIsStatic), superExecute(superExecute)  { }
 
    const char *name;
    bool isStatic;
+   StackExecute superExecute;
 };
 
 
@@ -113,6 +117,7 @@ inline Dynamic StackContext::getObject(int inPos)
 enum SignatureChar
 {
    sigVoid = 'v',
+   sigBool = 'b',
    sigInt = 'i',
    sigFloat = 'f',
    sigString = 's',
@@ -212,6 +217,13 @@ void __scriptable_load_abc(Array<unsigned char> inBytes);
    hx::ScriptableRegisterClass( HX_CSTRING(name), (int)offsetof(class##__scriptable,__scriptVTable) + sizeof(void *), __scriptableFunctions, class##__scriptable::__script_create, class##__scriptable::__script_construct )
 
 
+#ifdef HXCPP_VISIT_ALLOCS
+#define SCRIPTABLE_VISIT_FUNCTION \
+void __Visit(HX_VISIT_PARAMS) { super::__Visit(HX_VISIT_ARG); hx::ScriptableVisit(__scriptVTable[-1],this,HX_VISIT_ARG); }
+#else
+#define SCRIPTABLE_VISIT_FUNCTION
+#endif
+
 
 #define HX_DEFINE_SCRIPTABLE(ARG_LIST) \
    inline void *operator new( size_t inSize, int inExtraDataSize ) \
@@ -232,14 +244,10 @@ void __scriptable_load_abc(Array<unsigned char> inBytes);
    ::String __ToString() const { return hx::ScriptableToString(__scriptVTable[-1]); } \
    hx::Class __GetClass() const { return hx::ScriptableGetClass(__scriptVTable[-1]); } \
    int __GetType() const { return hx::ScriptableGetType(__scriptVTable[-1]); } \
+   void __Mark(HX_MARK_PARAMS) { super::__Mark(HX_MARK_ARG); hx::ScriptableMark(__scriptVTable[-1],this,HX_MARK_ARG); } \
+   SCRIPTABLE_VISIT_FUNCTION
 
 
-#ifdef HXCPP_VISIT_ALLOCS
-#define SCRIPTABLE_VISIT_FUNCTION \
-void __Visit(HX_VISIT_PARAMS) { HX_VISIT_OBJECT(mDelegate.mPtr); }
-#else
-#define SCRIPTABLE_VISIT_FUNCTION
-#endif
 
 #define HX_DEFINE_SCRIPTABLE_INTERFACE \
    void **__scriptVTable; \
@@ -255,16 +263,8 @@ void __Visit(HX_VISIT_PARAMS) { HX_VISIT_OBJECT(mDelegate.mPtr); }
     return result; }
 
 
-#ifdef HXCPP_VISIT_ALLOCS
-#define SCRIPTABLE_DYNAMIC_VISIT_FUNCTION \
-void __Visit(HX_VISIT_PARAMS) { super::__Visit(HX_VISIT_ARG); hx::ScriptableVisit(__scriptVTable[-1],this,HX_VISIT_ARG); }
-#else
-#define SCRIPTABLE_DYNAMIC_VISIT_FUNCTION
-#endif
 
 #define HX_DEFINE_SCRIPTABLE_DYNAMIC \
-	void __Mark(HX_MARK_PARAMS) { super::__Mark(HX_MARK_ARG); hx::ScriptableMark(__scriptVTable[-1],this,HX_MARK_ARG); } \
-   SCRIPTABLE_DYNAMIC_VISIT_FUNCTION \
  \
 	hx::Val __Field(const ::String &inName,hx::PropertyAccess inCallProp) \
       { Dynamic result; if (hx::ScriptableField(this,inName,inCallProp,result)) return result; return super::__Field(inName,inCallProp); } \

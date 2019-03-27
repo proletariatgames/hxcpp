@@ -1,6 +1,5 @@
 import CopyFile.Overwrite;
 import haxe.io.Path;
-import haxe.xml.Fast;
 import haxe.Json;
 import sys.io.Process;
 import sys.FileSystem;
@@ -23,6 +22,12 @@ import Log.WHITE;
 
 using StringTools;
 
+#if (haxe_ver>=4)
+typedef XmlAccess = haxe.xml.Access;
+#else
+typedef XmlAccess = haxe.xml.Fast;
+#end
+
 #if haxe3
 typedef Hash<T> = haxe.ds.StringMap<T>;
 #end
@@ -34,6 +39,8 @@ typedef Linkers = Hash<Linker>;
 
 class BuildTool
 {
+   public inline static var SupportedVersion = 400;
+
    var mDefines:Hash<String>;
    var mCurrentIncludeFile:String;
    var mIncludePath:Array<String>;
@@ -57,6 +64,7 @@ class BuildTool
    public static var os="";
    public static var sAllowNumProcs = true;
    public static var sCompileThreadCount = 1;
+   public static var sThreadPool:ThreadPool;
    public static var sReportedThreads = -1;
    public static var HXCPP = "";
    public static var is64 = false;
@@ -75,6 +83,8 @@ class BuildTool
 
    public static var exitOnThreadError = false;
    public static var threadExitCode = 0;
+
+
 
    public function new(inJob:String,inDefines:Hash<String>,inTargets:Array<String>,
         inIncludePath:Array<String>, inDirtyList:Array<String> )
@@ -121,6 +131,7 @@ class BuildTool
          mDefines.remove(m32 ? "HXCPP_M64" : "HXCPP_M32");
       }
 
+      Profile.setEntry("parse xml"); 
 
       include("toolchain/setup.xml");
 
@@ -172,7 +183,7 @@ class BuildTool
 
 
          var xml_slow = Xml.parse(make_contents);
-         var xml = new Fast(xml_slow.firstElement());
+         var xml = new XmlAccess(xml_slow.firstElement());
 
          parseXML(xml,"",false);
          popFile();
@@ -194,6 +205,8 @@ class BuildTool
       getThreadCount();
 
       var cached = CompileCache.init(mDefines);
+
+      Profile.setEntry("setup cache"); 
 
       if (inJob=="cache")
       {
@@ -240,12 +253,18 @@ class BuildTool
       if (Log.verbose) Log.println ("");
 
       if (inTargets.remove("clear"))
+      {
+         Profile.setEntry("clear"); 
          for(target in mTargets.keys())
             cleanTarget(target,false);
+       }
 
       if (inTargets.remove("clean"))
+      {
+         Profile.setEntry("clean"); 
          for(target in mTargets.keys())
             cleanTarget(target,true);
+      }
 
       if (destination!=null && inTargets.length!=1)
       {
@@ -253,6 +272,7 @@ class BuildTool
          destination = null;
       }
 
+      Profile.setEntry("build"); 
       for(target in inTargets)
          buildTarget(target,destination);
 
@@ -313,6 +333,9 @@ class BuildTool
             Log.v("\x1b[33;1mUsing compile threads: " + sCompileThreadCount + "\x1b[0m");
          }
       }
+      if (sCompileThreadCount>1 && sThreadPool==null)
+         sThreadPool = new ThreadPool(sCompileThreadCount);
+
       return sCompileThreadCount;
    }
 
@@ -325,6 +348,9 @@ class BuildTool
 
    public function buildTarget(inTarget:String, inDestination:String)
    {
+      //var dependDebug = function(s:String) Log.error(s);
+      var dependDebug = null;
+
       // Sys.println("Build : " + inTarget );
       if (!mTargets.exists(inTarget))
       {
@@ -343,7 +369,7 @@ class BuildTool
       for(sub in target.mSubTargets)
          buildTarget(sub,null);
 
-      var threads = BuildTool.sCompileThreadCount;
+      var threadPool = BuildTool.sThreadPool;
 
 
       PathManager.resetDirectoryCache();
@@ -390,15 +416,47 @@ class BuildTool
 
          var inList = new Array<Bool>();
          var groupIsOutOfDate = mDirtyList.indexOf(group.mId)>=0 || mDirtyList.indexOf("all")>=0;
+
+         if (useCache)
+         {
+            Profile.push("compute hash");
+            if (useCache && group.mFiles.length>1 && threadPool!=null)
+            {
+               Log.initMultiThreaded();
+               threadPool.setArrayCount( group.mFiles.length );
+               threadPool.runJob( function(tid) {
+                  var localCache = new Map<String,String>();
+
+                  while(threadExitCode==0)
+                  {
+                     var id = sThreadPool.getNextIndex();
+                     if (id<0)
+                        break;
+
+                     group.mFiles[id].computeDependHash(localCache);
+                  }
+               } );
+            }
+            else
+            {
+               for(file in group.mFiles)
+                  file.computeDependHash(null);
+            }
+            Profile.pop();
+         }
+
+
          for(file in group.mFiles)
          {
-           if (useCache)
-               file.computeDependHash();
             var obj_name = mCompiler.getCachedObjName(file);
             groupObjs.push(obj_name);
-            var outOfDate = groupIsOutOfDate || file.isOutOfDate(obj_name);
+            var outOfDate = groupIsOutOfDate || file.isOutOfDate(obj_name, dependDebug);
             if (outOfDate)
+            {
+               if (dependDebug!=null)
+                  dependDebug(mCompiler.getCacheString(file));
                to_be_compiled.push(file);
+            }
             inList.push(outOfDate);
          }
          var someCompiled = to_be_compiled.length > 0;
@@ -406,6 +464,8 @@ class BuildTool
          var pchStamp:Null<Float> = null;
          if (group.mPrecompiledHeader!="")
          {
+            Profile.push("pch");
+
             var obj = mCompiler.precompile(group,cached || to_be_compiled.length==0);
             if (obj!=null)
             {
@@ -433,6 +493,7 @@ class BuildTool
                }
                */
             }
+            Profile.pop();
          }
 
          if (group.mConfig!="")
@@ -520,60 +581,35 @@ class BuildTool
             }
          } : null;
 
-         if (threads<2)
+         Profile.push("compile");
+         if (threadPool==null)
          {
             for(file in to_be_compiled)
                mCompiler.compile(file,-1,groupHeader,pchStamp);
          }
          else
          {
-            var mutex = new Mutex();
             Log.initMultiThreaded();
-            var main_thread = Thread.current();
+            var mutex = threadPool.mutex;
             var compiler = mCompiler;
-            for(t in 0...threads)
-            {
-               Thread.create(function()
-               {
-                  try
-                  {
+            threadPool.setArrayCount(to_be_compiled.length);
+            threadPool.runJob( function(threadId:Int) {
                   while(threadExitCode==0)
                   {
-                     mutex.acquire();
-                     if (to_be_compiled.length==0)
-                     {
-                        mutex.release();
+                     var index = threadPool.getNextIndex();
+                     if (index<0)
                         break;
-                     }
-                     var file = to_be_compiled.shift();
-                     mutex.release();
-                     compiler.compile(file,t,groupHeader,pchStamp);
-                  }
-                  }
-                  catch (error:Dynamic)
-                  {
-                     if (threadExitCode!=0)
-                        setThreadError(-1);
-                     else
-                        Log.warn("Error in compile thread: " + error);
-                  }
-                  main_thread.sendMessage("Done");
-               });
-            }
+                     var file = to_be_compiled[index];
 
-            // Wait for theads to finish...
-            for(t in 0...threads)
-            {
-               Thread.readMessage(true);
-            }
-
-            // Already printed the error from the thread, just need to exit
-            if (threadExitCode!=0)
-               Tools.exit(threadExitCode);
+                     compiler.compile(file,threadId,groupHeader,pchStamp);
+                  }
+            });
          }
+         Profile.pop();
 
-         if (group.mAsLibrary && mLinkers.exists("static_link"))
+         if (CompileCache.hasCache && group.mAsLibrary && mLinkers.exists("static_link"))
          {
+            Profile.push("link libs");
             var linker = mLinkers.get("static_link");
             var targetDir = mCompiler.mObjDir;
             if (useCache)
@@ -589,6 +625,7 @@ class BuildTool
             // Linux the libraries must be added again if the references were not resolved the firs time
             if (group.mAddTwice)
                target.mLibs.push(linker.mLastOutName);
+            Profile.pop();
          }
          else if (nvcc)
          {
@@ -608,6 +645,7 @@ class BuildTool
       switch(target.mTool)
       {
          case "linker":
+            Profile.push("linker");
             if (mPrelinkers.exists(target.mToolID))
             {
                var result = mPrelinkers.get(target.mToolID).prelink(target,objs, mCompiler);
@@ -661,11 +699,17 @@ class BuildTool
                   CopyFile.copyFile(output, inDestination, false, Overwrite.ALWAYS, chmod);
                }
             }
+            Profile.pop();
       }
 
-      for(copyFile in mCopyFiles)
-         if (copyFile.toolId==null || copyFile.toolId==target.mToolID)
-            copyFile.copy(target.mOutputDir);
+      if (mCopyFiles.length>0)
+      {
+         Profile.push("copy files");
+         for(copyFile in mCopyFiles)
+            if (copyFile.toolId==null || copyFile.toolId==target.mToolID)
+               copyFile.copy(target.mOutputDir);
+         Profile.pop();
+      }
 
       if (restoreDir!="")
          Sys.setCwd(restoreDir);
@@ -731,7 +775,7 @@ class BuildTool
          Sys.setCwd(restoreDir);
    }
 
-   public function createCompiler(inXML:Fast,inBase:Compiler) : Compiler
+   public function createCompiler(inXML:XmlAccess,inBase:Compiler) : Compiler
    {
       var c = inBase;
       if (inBase==null || inXML.has.replace)
@@ -770,7 +814,7 @@ class BuildTool
                      pushFile(full_name,"compiler");
                      var make_contents = sys.io.File.getContent(full_name);
                      var xml_slow = Xml.parse(make_contents);
-                     createCompiler(new Fast(xml_slow.firstElement()),c);
+                     createCompiler(new XmlAccess(xml_slow.firstElement()),c);
                      popFile();
                   }
                   else if (!el.has.noerror)
@@ -800,7 +844,7 @@ class BuildTool
          var make_contents = sys.io.File.getContent(incName);
          mPragmaOnce.set(incName,true);
          var xml = Xml.parse(make_contents);
-         parseXML(new Fast(xml.firstElement()),"", false);
+         parseXML(new XmlAccess(xml.firstElement()),"", false);
          popFile();
       }
    }
@@ -811,13 +855,16 @@ class BuildTool
    }
 
 
-   public function createFileGroup(inXML:Fast,inFiles:FileGroup,inName:String, inForceRelative:Bool, inTags:String):FileGroup
+   public function createFileGroup(inXML:XmlAccess,inFiles:FileGroup,inName:String, inForceRelative:Bool, inTags:String):FileGroup
    {
       var dir = inXML.has.dir ? substitute(inXML.att.dir) : ".";
       if (inForceRelative)
          dir = PathManager.combine( Path.directory(mCurrentIncludeFile), dir );
 
-      var group = inFiles==null ? new FileGroup(dir,inName, inForceRelative) : inFiles;
+      var group = inFiles==null ? new FileGroup(dir,inName, inForceRelative) :
+                                  inXML.has.replace ? inFiles.replace(dir, inForceRelative) :
+                                  inFiles;
+
       if (inTags!=null)
          group.mTags = inTags;
 
@@ -827,21 +874,31 @@ class BuildTool
             switch(el.name)
             {
                case "file" :
-                  var file = new File(substitute(el.att.name),group);
+                  var name = substitute(el.att.name);
+                  var file = group.find(name);
+                  if (file==null)
+                  {
+                     file = new File(name,group);
+                     group.addFile( file );
+                  }
+
                   if (el.has.tags)
                      file.setTags( substitute(el.att.tags) );
                   if (el.has.filterout)
                      file.mFilterOut = substitute(el.att.filterout);
+                  if (el.has.embedName)
+                     file.mEmbedName = substitute(el.att.embedName);
+                  if (el.has.scramble)
+                     file.mScramble = substitute(el.att.scramble);
                   for(f in el.elements)
                      if (valid(f,"") && f.name=="depend")
                         file.mDepends.push( substitute(f.att.name) );
-                  group.mFiles.push( file );
                case "section" : createFileGroup(el,group,inName,inForceRelative,null);
                case "cache" :
                   group.mUseCache = parseBool( substitute(el.att.value) );
                   if (el.has.project)
                      group.mCacheProject = substitute(el.att.project);
-                  if (el.has.asLibrary && CompileCache.hasCache)
+                  if (el.has.asLibrary)
                      group.mAsLibrary = true;
                case "tag" :
                    group.addTag( substitute(el.att.value) );
@@ -893,7 +950,7 @@ class BuildTool
                         pushFile(full_name, "FileGroup");
                         var make_contents = sys.io.File.getContent(full_name);
                         var xml_slow = Xml.parse(make_contents);
-                        createFileGroup(new Fast(xml_slow.firstElement()), group, inName, false,null);
+                        createFileGroup(new XmlAccess(xml_slow.firstElement()), group, inName, false,null);
                         popFile();
                      }
                   }
@@ -908,7 +965,7 @@ class BuildTool
       return group;
    }
 
-   public function createLinker(inXML:Fast,inBase:Linker):Linker
+   public function createLinker(inXML:XmlAccess,inBase:Linker):Linker
    {
       var exe:String = inXML.has.exe ? substitute(inXML.att.exe) : null;
       if (inBase!=null && !inXML.has.replace && inBase.mExe==null)
@@ -949,7 +1006,7 @@ class BuildTool
       return l;
    }
 
-   public function createPrelinker(inXML:Fast,inBase:Prelinker):Prelinker
+   public function createPrelinker(inXML:XmlAccess,inBase:Prelinker):Prelinker
    {
       var l = (inBase!=null && !inXML.has.replace) ? inBase : new Prelinker(substitute(inXML.att.exe));
       for(el in inXML.elements)
@@ -970,7 +1027,7 @@ class BuildTool
       return l;
    }
 
-   public function createStripper(inXML:Fast,inBase:Stripper):Stripper
+   public function createStripper(inXML:XmlAccess,inBase:Stripper):Stripper
    {
       var s = (inBase!=null && !inXML.has.replace) ? inBase :
                  new Stripper(substitute(inXML.att.exe));
@@ -987,7 +1044,7 @@ class BuildTool
       return s;
    }
 
-   public function createTarget(inXML:Fast,?inTarget:Target, inForceRelative) : Target
+   public function createTarget(inXML:XmlAccess,?inTarget:Target, inForceRelative) : Target
    {
       var target:Target = inTarget;
       var output = inXML.has.output ? substitute(inXML.att.output) : "";
@@ -1161,6 +1218,12 @@ class BuildTool
       return instance.mDefines.get("MSVC_VER");
    }
 
+   static public function keepTemp()
+   {
+      return instance.mDefines.exists("HXCPP_KEEP_TEMP");
+   }
+
+
    // Setting HXCPP_COMPILE_THREADS to 2x number or cores can help with hyperthreading
    public static function getNumberOfProcesses():Int
    {
@@ -1286,6 +1349,8 @@ class BuildTool
       var makefile:String="";
       var optionsTxt = "Options.txt";
 
+      Profile.start();
+
       include_path.push(".");
 
       var args = Sys.args();
@@ -1342,7 +1407,7 @@ class BuildTool
          var binDir = isWindows ? "Windows" : isMac ? "Mac64" : isLinux ? "Linux64" : null;
          if (binDir==null)
             Log.error("Cppia is not supported on this host.");
-         var binDir = isWindows ? "Windows" : isMac ? "Mac64" : isLinux ? "Linux64" : null;
+         var binDir = isWindows ? "Windows64" : isMac ? "Mac64" : isLinux ? "Linux64" : null;
          var exe = '$HXCPP/bin/$binDir/Cppia' + (isWindows ? ".exe" : "");
          if (!isWindows)
          {
@@ -1351,7 +1416,7 @@ class BuildTool
             {
                var stat = FileSystem.stat(exe);
                if (stat==null)
-                  throw "Could not find exe";
+                  throw "Could not find exe:" + exe;
                var mode = stat.mode;
                var exeFlags = (1<<0) | (1<<3) | (1<<6);
                if ( (mode&exeFlags) != exeFlags )
@@ -1470,6 +1535,9 @@ class BuildTool
          a++;
       }
 
+      if (defines.exists("HXCPP_TIMES"))
+         Profile.enable();
+
       if (defines.exists("HXCPP_NO_COLOUR") || defines.exists("HXCPP_NO_COLOR"))
          Log.colorSupported = false;
       Log.verbose = Log.verbose || defines.exists("HXCPP_VERBOSE");
@@ -1508,6 +1576,7 @@ class BuildTool
            }
       }
 
+      Profile.setEntry("setup"); 
       Setup.initHXCPPConfig(defines);
 
       if (HXCPP=="" && env.exists("HXCPP"))
@@ -1817,6 +1886,21 @@ class BuildTool
          {
             defines.set("toolchain","linux");
             defines.set("linux","linux");
+
+            if (defines.exists("HXCPP_LINUX_ARMV7"))
+            {
+               defines.set("noM32","1");
+               defines.set("noM64","1");
+               defines.set("HXCPP_ARMV7","1");
+               m64 = false;
+            }
+            else if (defines.exists("HXCPP_LINUX_ARM64"))
+            {
+               defines.set("noM32","1");
+               defines.set("noM64","1");
+               defines.set("HXCPP_ARM64","1");
+               m64 = true;
+            }
             defines.set("BINDIR", m64 ? "Linux64":"Linux");
          }
       }
@@ -1959,7 +2043,7 @@ class BuildTool
       }
    }
 
-   function parseXML(inXML:Fast,inSection:String, forceRelative:Bool)
+   function parseXML(inXML:XmlAccess,inSection:String, forceRelative:Bool)
    {
       for(el in inXML.elements)
       {
@@ -2013,7 +2097,7 @@ class BuildTool
                case "files" :
                   var name = substitute(el.att.id);
                   var tags = el.has.tags ? substitute(el.att.tags) : null;
-                  if (mFileGroups.exists(name))
+                  if (mFileGroups.exists(name) )
                      createFileGroup(el, mFileGroups.get(name), name, false, tags);
                   else
                      mFileGroups.set(name,createFileGroup(el,null,name, forceRelative,tags));
@@ -2113,7 +2197,9 @@ class BuildTool
          var make_contents = sys.io.File.getContent(full_name);
          var xml_slow = Xml.parse(make_contents);
 
-         parseXML(new Fast(xml_slow.firstElement()),inSection, forceRelative);
+         Profile.push( haxe.io.Path.withoutDirectory(inName) );
+         parseXML(new XmlAccess(xml_slow.firstElement()),inSection, forceRelative);
+         Profile.pop();
 
          mCurrentIncludeFile = oldInclude;
          popFile();
@@ -2223,7 +2309,7 @@ class BuildTool
       return result=="t" || result=="true" || result=="1";
    }
 
-   public function valid(inEl:Fast,inSection:String):Bool
+   public function valid(inEl:XmlAccess,inSection:String):Bool
    {
       if (inEl.x.get("if") != null)
       {
@@ -2280,6 +2366,17 @@ class BuildTool
             return false;
          }
       }
+
+      if (inEl.has.unlessApi)
+      {
+         var value = substitute(inEl.att.unlessApi);
+         try {
+            var val = Std.parseInt(value);
+            if (val<=SupportedVersion)
+               return false;
+         } catch(e:Dynamic) { }
+      }
+
 
       if (inEl.has.ifExists)
          if (!FileSystem.exists( substitute(inEl.att.ifExists) )) return false;

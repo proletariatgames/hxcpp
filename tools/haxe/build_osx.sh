@@ -3,22 +3,18 @@
 
   git clone --recursive https://github.com/HaxeFoundation/haxe.git ~/haxe --depth 1
 
+  brew update
   brew tap Homebrew/bundle
-  brew bundle --file=~/haxe/tests/Brewfile
+  brew bundle --file=~/haxe/tests/Brewfile --no-upgrade
+
+  brew install neko --HEAD;
 
   export OPAMYES=1
   opam init
   eval `opam config env`
-  opam install camlp4 sedlex ocamlfind camlzip xml-light extlib rope
-
-  # Install a patched ptmap. See https://github.com/backtracking/ptmap/issues/3
-  opam install obuild qtest
-  git clone https://github.com/andyli/ptmap.git --branch 4.05 ~/ptmap
-  pushd ~/ptmap
-  make && sudo make install
-  popd
-
-  brew install neko --HEAD;
+  opam update
+  opam pin add haxe ~/haxe --no-action
+  opam install haxe --deps-only
 
   # Build haxe
   pushd ~/haxe

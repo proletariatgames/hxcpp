@@ -88,6 +88,18 @@
   <flag value="--no-undefined" unless="HXCPP_ALLOW_UNDEFINED" />
   <flag value="${HXCPP_LINK_OPTIM_LEVEL}"/>
   <flag value="-debug" if="HXCPP_DEBUG_LINK"/>
+
+
+  <section if="HXCPP_LINK_TOTAL_MEMORY" >
+     <flag value="-s" />
+     <flag value="TOTAL_MEMORY=${HXCPP_LINK_TOTAL_MEMORY}" />
+  </section>
+
+  <section if="HXCPP_LINK_MEM_FILE" >
+    <flag value="--memory-init-file"/>
+    <flag value="${HXCPP_LINK_MEM_FILE}"/>
+  </section>
+
   <!-- <flag value="-DBUILD_AS_SHARED_LIBRARY" /> -->
   <!-- <lib name="-ldl"/> -->
   <!-- <ext value=".js"/> -->
@@ -138,6 +150,16 @@
      <flag value="-s" />
      <flag value="DEMANGLE_SUPPORT=1" />
      <flag value="-debug" />
+  </section>
+
+  <section if="WASM" >
+     <flag value="-s"/>
+     <flag value="WASM=1" />
+  </section>
+
+  <section if="BINARYEN_METHOD" >
+     <flag name="-s" />
+     <flag value="BINARYEN_METHOD='${BINARYEN_METHOD}'" />
   </section>
 
   <flag value="--bind" if="HXCPP_JS_PRIME" />

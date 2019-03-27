@@ -132,6 +132,7 @@ enum ArrayFunc
    af__crement,
    af__SetSizeExact,
    afBlit,
+   afResize,
 };
 
 
@@ -252,7 +253,7 @@ struct ScriptCallable : public CppiaDynamicExpr
    int argCount;
    int stackSize;
    bool hasDefaults;
-   
+
    std::vector<CppiaStackVar> args;
    std::vector<bool>          hasDefault;
    std::vector<CppiaConst>    initVals;
@@ -339,6 +340,8 @@ struct TypeData
    HaxeNativeInterface *interfaceBase;
    bool                linked;
    bool                isInterface;
+   bool                isDynamic;
+   bool                isFloat;
    ArrayType           arrayType;
 
    TypeData(String inData);
@@ -355,7 +358,7 @@ class CppiaModule
 {
 public:
    Array< String >                 strings;
-   std::vector< std::string >      cStrings;
+   //std::vector< std::string >      cStrings;
    std::vector< TypeData * >       types;
    std::vector< CppiaClassInfo * > classes;
    std::vector< CppiaExpr * >      markable;
@@ -405,19 +408,6 @@ struct StackLayout
    void dump(Array<String> &inStrings, std::string inIndent);
    CppiaStackVar *findVar(int inId);
 };
-
-struct ScriptStackFrame
-{
-   ScriptStackFrame(ScriptCallable *inCallable, unsigned char *inFrame)
-      : callable(inCallable),
-        frame(inFrame)
-   {
-   }
-
-   ScriptCallable *callable;
-   unsigned char  *frame;
-};
-
 
 
 struct ArgInfo
@@ -517,13 +507,18 @@ struct CppiaVar
    ExprType         exprType;
 
    CppiaExpr        *init;
+
    Dynamic          objVal;
-   bool             boolVal;
-   int              intVal;
-   Float            floatVal;
+   union {
+      int              boolVal;
+      int              byteVal;
+      int              intVal;
+      Float            floatVal;
+   };
    String           stringVal;
+
    void             *valPointer;
-   
+
 
    CppiaVar(bool inIsStatic);
    CppiaVar(CppiaFunction *inDynamicFunction);
@@ -576,17 +571,17 @@ class HaxeNativeClass
 public:
    std::string  name;
    hx::ScriptableClassFactory factory;
-   hx::ScriptFunction  construct;
+   hx::ScriptNamedFunction  construct;
    ScriptNamedFunction *functions;
    HaxeNativeClass *haxeSuper;
    int mDataOffset;
 
-   HaxeNativeClass(const std::string &inName, int inDataOffset, ScriptNamedFunction *inFunctions, hx::ScriptableClassFactory inFactory, ScriptFunction inConstruct);
+   HaxeNativeClass(const std::string &inName, int inDataOffset, ScriptNamedFunction *inFunctions, hx::ScriptableClassFactory inFactory, ScriptNamedFunction inConstruct);
 
    void addVtableEntries( std::vector<std::string> &outVtable);
    void dump();
-   ScriptFunction findFunction(const std::string &inName);
-   ScriptFunction findStaticFunction(String inName);
+   ScriptNamedFunction findFunction(const std::string &inName);
+   ScriptNamedFunction findStaticFunction(String inName);
 
    static HaxeNativeClass *findClass(const std::string &inName);
    static HaxeNativeClass *hxObject();
@@ -784,13 +779,29 @@ public:
    #define CPPIA_STACK_LINE(expr)
 #endif
 
-#ifdef HXCPP_STACK_SCRIPTABLE
-   #define CPPIA_STACK_FRAME(expr) \
-      ScriptStackFrame scriptFrame(expr,ctx->frame); \
-      hx::StackFrame stackframe(&expr->position, &scriptFrame);
+#ifdef HXCPP_STACK_TRACE
+   struct CppiaStackFrame
+   {
+      hx::StackContext *ctx;
+      hx::StackFrame *frame;
+      CppiaStackFrame(hx::StackContext *inCtx, hx::StackPosition *inPosition)
+      {
+         ctx = inCtx;
+         frame = (hx::StackFrame *)ctx->stackAlloc(sizeof(hx::StackFrame));
+         frame->position = inPosition;
+         frame->variables = 0;
+         frame->catchables = 0;
+         inCtx->pushFrame(frame);
+      }
+      ~CppiaStackFrame()
+      {
+         ctx->popFrame(frame);
+      }
+   };
+
+   #define CPPIA_STACK_FRAME(expr) hx::CppiaStackFrame __frame(ctx,&expr->position);
 #else
-   #define CPPIA_STACK_FRAME(expr) \
-      HX_STACKFRAME(&expr->position);
+   #define CPPIA_STACK_FRAME(expr)
 #endif
 
 
@@ -987,7 +998,7 @@ struct CrementPostDec
       inVal = Dynamic(Dynamic(inVal) - 1).mPtr;
       return result;
    }
- 
+
 };
 
 

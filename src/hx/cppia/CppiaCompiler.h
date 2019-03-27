@@ -237,24 +237,24 @@ enum JitCompare
    cmpI_MUL_NOT_OVERFLOW =  13 | 0x100,
 
    /* Floating point comparison types - double. */
-   cmpD_EQUAL =             14,
-   cmpD_NOT_EQUAL =         15,
-   cmpD_LESS =              16,
-   cmpD_GREATER_EQUAL =     17,
-   cmpD_GREATER =           18,
-   cmpD_LESS_EQUAL =        19,
-   cmpD_UNORDERED =         20,
-   cmpD_ORDERED =           21,
+   cmpD_EQUAL =             16,
+   cmpD_NOT_EQUAL =         17,
+   cmpD_LESS =              18,
+   cmpD_GREATER_EQUAL =     19,
+   cmpD_GREATER =           20,
+   cmpD_LESS_EQUAL =        21,
+   cmpD_UNORDERED =         22,
+   cmpD_ORDERED =           23,
 
    /* Floating point comparison types - single. */
-   cmpS_EQUAL =             14 | 0x100,
-   cmpS_NOT_EQUAL =         15 | 0x100,
-   cmpS_LESS =              16 | 0x100,
-   cmpS_GREATER_EQUAL =     17 | 0x100,
-   cmpS_GREATER =           18 | 0x100,
-   cmpS_LESS_EQUAL =        19 | 0x100,
-   cmpS_UNORDERED =         20 | 0x100,
-   cmpS_ORDERED =           21 | 0x100,
+   cmpS_EQUAL =             16 | 0x100,
+   cmpS_NOT_EQUAL =         17 | 0x100,
+   cmpS_LESS =              18 | 0x100,
+   cmpS_GREATER_EQUAL =     19 | 0x100,
+   cmpS_GREATER =           20 | 0x100,
+   cmpS_LESS_EQUAL =        21 | 0x100,
+   cmpS_UNORDERED =         22 | 0x100,
+   cmpS_ORDERED =           23 | 0x100,
 
 };
 
@@ -293,8 +293,10 @@ typedef sljit_label *LabelId;
 typedef sljit_jump  *JumpId;
 
 typedef void (SLJIT_CALL *CppiaFunc)(CppiaCtx *inCtx);
+typedef void (*OnReturnFunc)(class CppiaCompiler *inCompiler, int stackSize);
 
 typedef std::vector<JumpId> ThrowList;
+
 
 class CppiaCompiler
 {
@@ -333,6 +335,7 @@ public:
 
    virtual LabelId setContinuePos(LabelId inNewPos) = 0;
    virtual void  addContinue() = 0;
+   virtual void  swapBreakList(QuickVec<JumpId> &ioBreakList) = 0;
    virtual void  addBreak() = 0;
    virtual void  setBreakTarget() = 0;
 
@@ -358,7 +361,10 @@ public:
 
    virtual void setMaxPointer() = 0;
 
-   // Scriptable?
+   virtual int  getBaseSize() = 0;
+   virtual void setLineOffset( int inOffset ) = 0;
+   virtual int  getLineOffset( ) = 0;
+   virtual void setOnReturn( OnReturnFunc inFunc, int inStackSize ) = 0;
    virtual void addReturn() = 0;
 
    virtual void trace(const char *inValue) = 0;

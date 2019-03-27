@@ -33,6 +33,10 @@ static void SLJIT_CALL arraySetSizeExact(ArrayAnyImpl *inObj, int inSize)
 {
    inObj->__SetSizeExact(inSize);
 }
+static void SLJIT_CALL arrayResize(ArrayAnyImpl *inObj, int inSize)
+{
+   inObj->resize(inSize);
+}
 
 
 static hx::Object * SLJIT_CALL arraySplice(ArrayAnyImpl *inObj, hx::Object *a0, hx::Object *a1)
@@ -597,6 +601,16 @@ struct ArrayBuiltinAny : public ArrayBuiltinBase
       return 0;
    }
 
+   static int SLJIT_CALL runIndexOf( ArrayAnyImpl *inArray, hx::Object *inItem)
+   {
+      return inArray->indexOf(inItem);
+   }
+
+   static int SLJIT_CALL runLastIndexOf( ArrayAnyImpl *inArray, hx::Object *inItem)
+   {
+      return inArray->lastIndexOf(inItem);
+   }
+
 
    void genCode(CppiaCompiler *compiler, const JitVal &inDest, ExprType destType)
    {
@@ -679,6 +693,16 @@ struct ArrayBuiltinAny : public ArrayBuiltinBase
 
 
 
+         case afIndexOf:
+         case afLastIndexOf:
+            {
+            args[0]->genCode(compiler, sJitArg1.as(jtPointer), etObject);
+            compiler->callNative( (void *)(FUNC==afIndexOf ? runIndexOf : runLastIndexOf), thisVal, sJitArg1.as(jtPointer));
+            compiler->convertReturnReg(etInt, inDest, destType );
+            }
+            break;
+
+
 
          case afJoin:
             {
@@ -707,6 +731,16 @@ struct ArrayBuiltinAny : public ArrayBuiltinBase
                compiler->callNative( (void *)arraySetSizeExact, thisVal, sJitArg1.as(jtInt));
                break;
             }
+
+         case afResize:
+            {
+               JitTemp thisVal(compiler,jtPointer);
+               thisExpr->genCode(compiler, thisVal, etObject);
+               args[0]->genCode(compiler, sJitArg1.as(jtInt), etInt);
+               compiler->callNative( (void *)arrayResize, thisVal, sJitArg1.as(jtInt));
+               break;
+            }
+
          case afBlit:
             {
 
@@ -899,6 +933,8 @@ CppiaExpr *createArrayAnyBuiltin(CppiaExpr *src, CppiaExpr *inThisExpr, String f
       return TCreateArrayAnyBuiltin<af__SetSizeExact>(src, inThisExpr, ioExpressions);
    if (field==HX_CSTRING("blit"))
       return TCreateArrayAnyBuiltin<afBlit>(src, inThisExpr, ioExpressions);
+   if (field==HX_CSTRING("resize"))
+      return TCreateArrayAnyBuiltin<afResize>(src, inThisExpr, ioExpressions);
 
    return 0;
 }

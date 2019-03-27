@@ -364,6 +364,7 @@ static void VisitLocalAlloc(LocalAllocator *inAlloc,hx::VisitContext *__inCtx);
 #endif
 static void WaitForSafe(LocalAllocator *inAlloc);
 static void ReleaseFromSafe(LocalAllocator *inAlloc);
+static void ClearPooledAlloc(LocalAllocator *inAlloc);
 static void CollectFromThisThread(bool inMajor);
 
 namespace hx
@@ -2499,6 +2500,12 @@ bool IsWeakRefValid(hx::Object *inPtr)
     return isCurrent;
 }
 
+static void someHackyFunc(hx::Object *)
+{
+}
+
+static void (*hackyFunctionCall)(hx::Object *) = someHackyFunc;
+
 struct Finalizable
 {
    union
@@ -2528,7 +2535,13 @@ struct Finalizable
    void run()
    {
       if (isMember)
-         (((hx::Object *)base)->*member)();
+      {
+         hx::Object *object = (hx::Object *)base;
+         // I can't tell if it is msvc over-optimizing this code, to I am not
+         //  quite calling things right, but this seems to fix it...
+         hackyFunctionCall(object);
+         (object->*member)();
+      }
       else
          alloc( base );
    }
@@ -3105,10 +3118,10 @@ public:
       if (inSize<<1 > mLargeAllocSpace)
          mLargeAllocSpace = inSize<<1;
 
-
       unsigned int *result = 0;
       bool do_lock = hx::gMultiThreadMode;
       bool isLocked = false;
+
 
       for(int i=0;i<largeObjectRecycle.size();i++)
       {
@@ -3118,12 +3131,14 @@ public:
             {
                mLargeListLock.Lock();
                isLocked = true;
-               if ( largeObjectRecycle[i][0] != inSize )
+               if ( largeObjectRecycle[i][0] != inSize || i>=largeObjectRecycle.size() )
                   continue;
             }
 
             result = largeObjectRecycle[i];
             largeObjectRecycle.qerase(i);
+            // You can use this to test race condition
+            //Sleep(1);
             break;
          }
       }
@@ -4207,7 +4222,7 @@ public:
          {
             // Wake zeroing thread
             ThreadPoolAutoLock l(sThreadPoolLock);
-            if (!sRunningThreads & 0x01)
+            if (!(sRunningThreads & 0x01))
             {
                #ifdef PROFILE_THREAD_USAGE
                sThreadZeroPokes++;
@@ -5085,6 +5100,13 @@ public:
       #ifdef HX_GC_VERIFY
       VerifyBlockOrder();
       #endif
+
+      for(int i=0;i<LOCAL_POOL_SIZE;i++)
+      {
+         LocalAllocator *l = mLocalPool[i];
+         if (l)
+            ClearPooledAlloc(l);
+      }
 
       #ifdef HXCPP_TELEMETRY
       __hxt_gc_end();
@@ -5996,6 +6018,11 @@ void MarkLocalAlloc(LocalAllocator *inAlloc,hx::MarkContext *__inCtx)
    inAlloc->Mark(__inCtx);
 }
 
+void ClearPooledAlloc(LocalAllocator *inAlloc)
+{
+   inAlloc->Reset();
+}
+
 #ifdef HXCPP_VISIT_ALLOCS
 void VisitLocalAlloc(LocalAllocator *inAlloc,hx::VisitContext *__inCtx)
 {
@@ -6058,6 +6085,9 @@ void ExitGCFreeZoneLocked()
 
 void InitAlloc()
 {
+   for(int i=0;i<IMMIX_LINE_LEN;i++)
+      gImmixStartFlag[i] = 1<<( i>>2 ) ;
+
    hx::CommonInitAlloc();
    sgAllocInit = true;
    sGlobalAlloc = new GlobalAllocator();
@@ -6077,9 +6107,6 @@ void InitAlloc()
    __hxcpp_thread_current();
 
    gMainThreadContext->onThreadAttach();
-
-   for(int i=0;i<IMMIX_LINE_LEN;i++)
-      gImmixStartFlag[i] = 1<<( i>>2 ) ;
 }
 
 
@@ -6092,6 +6119,7 @@ void GCPrepareMultiThreaded()
 
 void SetTopOfStack(int *inTop,bool inForce)
 {
+   bool threadAttached = false;
    if (inTop)
    {
       if (!sgAllocInit)
@@ -6102,6 +6130,7 @@ void SetTopOfStack(int *inTop,bool inForce)
          {
             GCPrepareMultiThreaded();
             RegisterCurrentThread(inTop);
+            threadAttached = true;
          }
       }
    }
@@ -6109,7 +6138,11 @@ void SetTopOfStack(int *inTop,bool inForce)
    LocalAllocator *tla = (LocalAllocator *)(hx::ImmixAllocator *)tlsStackContext;
 
    if (tla)
+   {
       tla->SetTopOfStack(inTop,inForce);
+      if (threadAttached)
+         tla->onThreadAttach();
+   }
 }
 
 
@@ -6290,7 +6323,6 @@ void RegisterCurrentThread(void *inTopOfStack)
    #ifdef HXCPP_SCRIPTABLE
    local->byteMarkId = hx::gByteMarkID;
    #endif
-   local->onThreadAttach();
 }
 
 void UnregisterCurrentThread()
@@ -6310,6 +6342,7 @@ void RegisterVTableOffset(int inOffset)
 
 void PushTopOfStack(void *inTop)
 {
+   bool threadAttached = false;
    if (!sgAllocInit)
       InitAlloc();
    else
@@ -6318,11 +6351,14 @@ void PushTopOfStack(void *inTop)
       {
          GCPrepareMultiThreaded();
          RegisterCurrentThread(inTop);
+         threadAttached = true;
       }
    }
  
    LocalAllocator *tla = GetLocalAlloc();
    tla->PushTopOfStack(inTop);
+   if (threadAttached)
+      tla->onThreadAttach();
 }
 
 void PopTopOfStack()

@@ -44,7 +44,8 @@ void CppiaModule::setDebug(CppiaExpr *outExpr, int inFileId, int inLine)
    #endif
    outExpr->className = creatingClass;
    outExpr->functionName = creatingFunction;
-   outExpr->filename = cStrings[inFileId].c_str();
+   //outExpr->filename = cStrings[inFileId].c_str();
+   outExpr->filename = strings[inFileId].__s;
    outExpr->line = inLine;
 }
 
@@ -378,12 +379,8 @@ CppiaLoadedModule LoadCppia(const unsigned char *inData, int inDataLength)
       stream.setBinary(tok=="CPPIB");
 
       int stringCount = stream.getAsciiInt();
-      cppia.cStrings.resize(stringCount);
       for(int s=0;s<stringCount;s++)
-      {
          cppia.strings[s] = stream.readString();
-         cppia.cStrings[s] = std::string(cppia.strings[s].__s,cppia.strings[s].length);
-      }
 
       int typeCount = stream.getAsciiInt();
       cppia.types.resize(typeCount);
@@ -430,7 +427,7 @@ CppiaLoadedModule LoadCppia(const unsigned char *inData, int inDataLength)
             tok = stream.getToken();
             if (tok!="RESO")
                throw "no reso tag";
-            
+
             scriptResources[r].mName = cppia.strings[stream.getInt()];
             scriptResources[r].mDataLength = stream.getInt();
          }
@@ -441,9 +438,19 @@ CppiaLoadedModule LoadCppia(const unsigned char *inData, int inDataLength)
          {
             int len = scriptResources[r].mDataLength;
             unsigned char *buffer = (unsigned char *)malloc(len+5);
-            *(int *)buffer = 0xffffffff;
+            *(unsigned int *)buffer = HX_GC_CONST_ALLOC_BIT;
             buffer[len+5-1] = '\0';
             stream.readBytes(buffer+4, len);
+            #ifdef HX_SMART_STRINGS_1
+            unsigned char *p = (unsigned char *)buffer+4;
+            unsigned char *end = p + len;
+            while(!hasBig && p<end)
+               if (*p++>127)
+               {
+                  *(unsigned int *)buffer |= HX_GC_STRING_CHAR16_T;
+                  break;
+               }
+            #endif
             scriptResources[r].mData = buffer + 4;
          }
          scriptResources[count].mDataLength = 0;
@@ -547,20 +554,28 @@ void addScriptableFile(String inName)
 
 #ifdef HXCPP_STACK_SCRIPTABLE
 
-void __hxcpp_dbg_getScriptableVariables(hx::ScriptStackFrame *inFrame, ::Array<Dynamic> outNames)
+void __hxcpp_dbg_getScriptableVariables(hx::StackFrame *inFrame, ::Array<Dynamic> outNames)
 {
-   inFrame->callable->getScriptableVariables(inFrame->frame, outNames);
+   hx::ScriptCallable *callable = inFrame->position->scriptCallable;
+   if (callable)
+      callable->getScriptableVariables((unsigned char *)inFrame, outNames);
 }
 
-bool __hxcpp_dbg_getScriptableValue(hx::ScriptStackFrame *inFrame, String inName, ::Dynamic &outValue)
+bool __hxcpp_dbg_getScriptableValue(hx::StackFrame *inFrame, String inName, ::Dynamic &outValue)
 {
-   return inFrame->callable->getScriptableValue(inFrame->frame, inName, outValue);
+   hx::ScriptCallable *callable = inFrame->position->scriptCallable;
+   if (callable)
+      return callable->getScriptableValue((unsigned char *)inFrame, inName, outValue);
+   return false;
 }
 
 
-bool __hxcpp_dbg_setScriptableValue(hx::ScriptStackFrame *inFrame, String inName, ::Dynamic inValue)
+bool __hxcpp_dbg_setScriptableValue(hx::StackFrame *inFrame, String inName, ::Dynamic inValue)
 {
-   return inFrame->callable->setScriptableValue(inFrame->frame, inName, inValue);
+   hx::ScriptCallable *callable = inFrame->position->scriptCallable;
+   if (callable)
+      return callable->setScriptableValue((unsigned char *)inFrame, inName, inValue);
+   return false;
 }
 
 #endif
