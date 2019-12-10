@@ -4034,7 +4034,7 @@ struct MemReferenceSetter : public CppiaExpr
 
             #ifdef HXCPP_GC_GENERATIONAL
             if (isPointerObject((T*)0))
-               genWriteBarrier(compiler, sJitTemp2, (tmpVal + (targetType==jtString ? StringOffset::Ptr) : 0)).as(jtPointer));
+               genWriteBarrier(compiler, sJitTemp2, (tmpVal + ((targetType==jtString ? StringOffset::Ptr : 0))).as(jtPointer) );
             #endif
 
             compiler->convert( tmpVal, getType(), inDest, destType );
@@ -4381,23 +4381,22 @@ struct MemReferenceCrement : public CppiaExpr
          case etFloat:
             {
             ioPtr.type = jtFloat;
-            JitVal fdiff( diff<0 ? &sMinusOne : &sOne );
-            compiler->move(sJitTemp0, fdiff);
+            compiler->move( sJitTemp1, (void *)(diff<0 ? &sMinusOne : &sOne) );
             if ( inDest.type==jtVoid)
             {
-               compiler->add( ioPtr,  ioPtr, sJitTemp0.star(etFloat) );
+               compiler->add( ioPtr,  ioPtr, sJitTemp1.star(etFloat) );
             }
             else if (op==coPostInc || op==coPostDec)
             {
                compiler->move( sJitTempF0, ioPtr );
-               compiler->add( ioPtr, sJitTempF0, sJitTemp0.star(etFloat) );
+               compiler->add( ioPtr, sJitTempF0, sJitTemp1.star(etFloat) );
                compiler->convert( sJitTempF0, etFloat, inDest, destType );
             }
             else
             {
-               compiler->add( sJitTempF0, ioPtr, sJitTemp0.star(etFloat) );
+               compiler->add( sJitTempF0, ioPtr, sJitTemp1.star(etFloat) );
                compiler->move( ioPtr, sJitTempF0);
-               compiler->convert( sJitTempF0, etInt, inDest, destType );
+               compiler->convert( sJitTempF0, etFloat, inDest, destType );
             }
             }
             break;
@@ -7884,24 +7883,24 @@ struct name \
    template<typename T> \
    inline bool test(const T &left, const T&right) \
    { \
-      return left OP right; \
+      return OP(left,right); \
    } \
 };
 
 #ifdef CPPIA_JIT
-DEFINE_COMPARE_OP(CompareLess,<,      cmpI_SIG_LESS,         cmpI_SIG_GREATER_EQUAL, cmpD_LESS,cmpD_GREATER_EQUAL);
-DEFINE_COMPARE_OP(CompareLessEq,<=,   cmpI_SIG_LESS_EQUAL,   cmpI_SIG_GREATER,       cmpD_LESS_EQUAL,cmpD_GREATER);
-DEFINE_COMPARE_OP(CompareGreater,>,   cmpI_SIG_GREATER,      cmpI_SIG_LESS_EQUAL,    cmpD_GREATER, cmpD_LESS_EQUAL);
-DEFINE_COMPARE_OP(CompareGreaterEq,>=,cmpI_SIG_GREATER_EQUAL,cmpI_SIG_LESS,          cmpD_GREATER_EQUAL, cmpD_LESS);
-DEFINE_COMPARE_OP(CompareEqual,==,    cmpI_EQUAL,            cmpI_NOT_EQUAL,         cmpD_EQUAL, cmpD_NOT_EQUAL);
-DEFINE_COMPARE_OP(CompareNotEqual,!=, cmpI_NOT_EQUAL,        cmpI_EQUAL,             cmpD_NOT_EQUAL, cmpD_EQUAL);
+DEFINE_COMPARE_OP(CompareLess, hx::IsLess,      cmpI_SIG_LESS,         cmpI_SIG_GREATER_EQUAL, cmpD_LESS,cmpD_GREATER_EQUAL);
+DEFINE_COMPARE_OP(CompareLessEq, hx::IsLessEq,   cmpI_SIG_LESS_EQUAL,   cmpI_SIG_GREATER,       cmpD_LESS_EQUAL,cmpD_GREATER);
+DEFINE_COMPARE_OP(CompareGreater, hx::IsGreater,   cmpI_SIG_GREATER,      cmpI_SIG_LESS_EQUAL,    cmpD_GREATER, cmpD_LESS_EQUAL);
+DEFINE_COMPARE_OP(CompareGreaterEq, hx::IsGreaterEq ,cmpI_SIG_GREATER_EQUAL,cmpI_SIG_LESS,          cmpD_GREATER_EQUAL, cmpD_LESS);
+DEFINE_COMPARE_OP(CompareEqual, hx::IsEq,    cmpI_EQUAL,            cmpI_NOT_EQUAL,         cmpD_EQUAL, cmpD_NOT_EQUAL);
+DEFINE_COMPARE_OP(CompareNotEqual, hx::IsNotEq, cmpI_NOT_EQUAL,        cmpI_EQUAL,             cmpD_NOT_EQUAL, cmpD_EQUAL);
 #else
-DEFINE_COMPARE_OP(CompareLess,<,0,0,0,0);
-DEFINE_COMPARE_OP(CompareLessEq,<=,0,0,0,0);
-DEFINE_COMPARE_OP(CompareGreater,>,0,0,0,0);
-DEFINE_COMPARE_OP(CompareGreaterEq,>=,0,0,0,0);
-DEFINE_COMPARE_OP(CompareEqual,==,0,0,0,0);
-DEFINE_COMPARE_OP(CompareNotEqual,!=,0,0,0,0);
+DEFINE_COMPARE_OP(CompareLess, hx::IsLess ,0,0,0,0);
+DEFINE_COMPARE_OP(CompareLessEq, hx::IsLessEq,0,0,0,0);
+DEFINE_COMPARE_OP(CompareGreater, hx::IsGreater ,0,0,0,0);
+DEFINE_COMPARE_OP(CompareGreaterEq, hx::IsGreaterEq,0,0,0,0);
+DEFINE_COMPARE_OP(CompareEqual,hx::IsEq,0,0,0,0);
+DEFINE_COMPARE_OP(CompareNotEqual,hx::IsNotEq,0,0,0,0);
 #endif
 
 

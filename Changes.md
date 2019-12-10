@@ -1,4 +1,14 @@
 
+* Upgrade buildserver to 4.01
+* Better generational collection in high fragmentation case
+* typeinfo include fix for MSVC
+* Fix MySQL connections
+* Fix bugs with HXCPP_GC_GENERATIONAL
+* Add map.clear
+* Better c++11 iOS support
+
+4.0.19
+------------------------------------------------------------
 
 * General Utf16 string improvements
 * Limit the amount of recursion in toString function

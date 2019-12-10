@@ -78,7 +78,7 @@ class Setup
                   var revision = StringTools.trim(split[1]);
                   var split2 = revision.split( "." );
                   var result:Float = 1.0 * Std.parseInt(split2[0]) + 0.001 * Std.parseInt(split2[1]);
-                  if (result!=null && result>=8)
+                  if (result>=8)
                   {
                      Log.v('Deduced NDK version '+result+' from "$inDirName"/source.properties');
                      fin.close();
@@ -419,6 +419,21 @@ class Setup
       }
       catch(e:Dynamic) { }
 
+      if(defines.exists('NDKV20+')) {
+         Log.info([
+            "x86 Platform: 16",
+            "arm Platform: 16",
+            "x86_64 Platform: 21",
+            "arm_64 Platform: 21",
+            "Frameworks should set the minSdkVersion for each APK to these values."
+         ].join('\n'));
+      }
+      else {
+         globallySetThePlatform(root, defines);
+      }
+   }
+
+   private static function globallySetThePlatform(root:String, defines:Map<String,String>) {
       var androidPlatform = 5;
       if (!defines.exists("PLATFORM"))
       {
@@ -469,7 +484,7 @@ class Setup
          defines.set("PLATFORM", "android-" + best);
          androidPlatform = best;
       }
-      defines.set("ANDROID_PLATFORM_DEFINE", "-DHXCPP_ANDROID_PLATFORM=" + androidPlatform);
+      defines.set("ANDROID_PLATFORM_DEFINE", "HXCPP_ANDROID_PLATFORM=" + androidPlatform);
       if (Log.verbose) Log.println("");
    }
 
