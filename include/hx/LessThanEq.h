@@ -262,46 +262,49 @@ bool IsNotNull(const T1 &v1)
    return !traits1::isNull(v1);
 }
 
-template<bool LESS, bool EQ, typename T1, typename T2>
-inline bool TestLessEq(const T1 &v1, const T2 &v2)
+// we need a class in order to have partial implementations
+template<bool LESS, bool EQ, typename T1, typename T2, int T1CompareType = CompareTraits<T1>::type, int T2CompareType = CompareTraits<T2>::type>
+struct PartialTestLessEq
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
 {
    typedef CompareTraits<T1> traits1;
    typedef CompareTraits<T2> traits2;
 
-   if (traits1::type==(int)CompareAsInt && traits2::type==(int)CompareAsInt)
+   if (T1CompareType==(int)CompareAsInt && T2CompareType==(int)CompareAsInt)
    {
       return LESS ? ( EQ ? traits1::toInt(v1) <= traits2::toInt(v2) :
                            traits1::toInt(v1) <  traits2::toInt(v2)  ) :
                     ( EQ ? traits1::toInt(v1) == traits2::toInt(v2) :
                            traits1::toInt(v1) != traits2::toInt(v2)  );
    }
-   else if (traits1::type<=(int)CompareAsInt64 && traits2::type<=(int)CompareAsInt64)
+   else if (T1CompareType<=(int)CompareAsInt64 && T2CompareType<=(int)CompareAsInt64)
    {
       return LESS ? ( EQ ? traits1::toInt64(v1) <= traits2::toInt64(v2) :
                            traits1::toInt64(v1) <  traits2::toInt64(v2)  ) :
                     ( EQ ? traits1::toInt64(v1) == traits2::toInt64(v2) :
                            traits1::toInt64(v1) != traits2::toInt64(v2)  );
    }
-   else if (traits1::type<=(int)CompareAsDouble && traits2::type<=(int)CompareAsDouble)
+   else if (T1CompareType<=(int)CompareAsDouble && T2CompareType<=(int)CompareAsDouble)
    {
       return LESS ? ( EQ ? traits1::toDouble(v1) <= traits2::toDouble(v2) :
                            traits1::toDouble(v1) <  traits2::toDouble(v2)  ) :
                     ( EQ ? traits1::toDouble(v1) == traits2::toDouble(v2) :
                            traits1::toDouble(v1) != traits2::toDouble(v2)  );
    }
-   else if (traits1::type==(int)CompareAsString && traits2::type==(int)CompareAsString)
+   else if (T1CompareType==(int)CompareAsString && T2CompareType==(int)CompareAsString)
    {
       return LESS ? ( EQ ? traits1::toString(v1) <= traits2::toString(v2) :
                            traits1::toString(v1) <  traits2::toString(v2)  ) :
                     ( EQ ? traits1::toString(v1) == traits2::toString(v2) :
                            traits1::toString(v1) != traits2::toString(v2)  );
    }
-   else if (traits1::type<=(int)CompareAsString && traits2::type<=(int)CompareAsString)
+   else if (T1CompareType<=(int)CompareAsString && T2CompareType<=(int)CompareAsString)
    {
       // String with a number...
       return false;
    }
-   else if (traits1::type==(int)CompareAsString || traits2::type==(int)CompareAsString)
+   else if (T1CompareType==(int)CompareAsString || T2CompareType==(int)CompareAsString)
    {
       // String with a object...
       return LESS ? ( EQ ? traits1::toString(v1) <= traits2::toString(v2) :
@@ -309,7 +312,7 @@ inline bool TestLessEq(const T1 &v1, const T2 &v2)
                     ( EQ ? traits1::toString(v1) == traits2::toString(v2) :
                            traits1::toString(v1) != traits2::toString(v2)  );
    }
-   else if (traits1::type<=(int)CompareAsDouble || traits2::type<=(int)CompareAsDouble)
+   else if (T1CompareType<=(int)CompareAsDouble || T2CompareType<=(int)CompareAsDouble)
    {
       // numeric with a object...
 
@@ -398,26 +401,227 @@ inline bool TestLessEq(const T1 &v1, const T2 &v2)
       }
    }
 }
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<true, true, T1, T2, CompareAsInt, CompareAsInt>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toInt(v1) <= traits2::toInt(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<true, false, T1, T2, CompareAsInt, CompareAsInt>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toInt(v1) < traits2::toInt(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<false, true, T1, T2, CompareAsInt, CompareAsInt>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toInt(v1) == traits2::toInt(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<false, false, T1, T2, CompareAsInt, CompareAsInt>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toInt(v1) != traits2::toInt(v2);
+}
+};
+
+// CompareAsInt64
+template<typename T1, typename T2>
+struct PartialTestLessEq<true, true, T1, T2, CompareAsInt64, CompareAsInt64>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toInt64(v1) <= traits2::toInt64(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<true, false, T1, T2, CompareAsInt64, CompareAsInt64>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toInt64(v1) < traits2::toInt64(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<false, true, T1, T2, CompareAsInt64, CompareAsInt64>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toInt64(v1) == traits2::toInt64(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<false, false, T1, T2, CompareAsInt64, CompareAsInt64>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toInt64(v1) != traits2::toInt64(v2);
+}
+};
+
+// CompareAsDouble
+template<typename T1, typename T2>
+struct PartialTestLessEq<true, true, T1, T2, CompareAsDouble, CompareAsDouble>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toDouble(v1) <= traits2::toDouble(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<true, false, T1, T2, CompareAsDouble, CompareAsDouble>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toDouble(v1) < traits2::toDouble(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<false, true, T1, T2, CompareAsDouble, CompareAsDouble>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toDouble(v1) == traits2::toDouble(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<false, false, T1, T2, CompareAsDouble, CompareAsDouble>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toDouble(v1) != traits2::toDouble(v2);
+}
+};
+
+// CompareAsString
+template<typename T1, typename T2>
+struct PartialTestLessEq<true, true, T1, T2, CompareAsString, CompareAsString>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toString(v1) <= traits2::toString(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<true, false, T1, T2, CompareAsString, CompareAsString>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toString(v1) < traits2::toString(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<false, true, T1, T2, CompareAsString, CompareAsString>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toString(v1) == traits2::toString(v2);
+}
+};
+
+template<typename T1, typename T2>
+struct PartialTestLessEq<false, false, T1, T2, CompareAsString, CompareAsString>
+{
+inline static bool Test(const T1 &v1, const T2 &v2)
+{
+   typedef CompareTraits<T1> traits1;
+   typedef CompareTraits<T2> traits2;
+
+   return traits1::toString(v1) != traits2::toString(v2);
+}
+};
+
+template<bool LESS, bool EQ, typename T1, typename T2, int T1CompareType = CompareTraits<T1>::type, int T2CompareType = CompareTraits<T2>::type>
+inline bool TestLessEq(const T1 &v1, const T2 &v2)
+{
+   return PartialTestLessEq<LESS, EQ, T1, T2, T1CompareType, T2CompareType>::Test(v1, v2);
+}
+
+template<typename T1, typename T2>
+inline bool IsEq(const T1 &v1, const T2 &v2) { return TestLessEq<false,true,T1,T2>(v1,v2); }
+
+template<typename T1, typename T2>
+inline bool IsNotEq(const T1 &v1, const T2 &v2) { return TestLessEq<false,false,T1,T2>(v1,v2); }
+
+template<typename T1, typename T2>
+inline bool IsLess(const T1 &v1, const T2 &v2) { return TestLessEq<true,false,T1,T2>(v1,v2); }
+
+template<typename T1, typename T2>
+inline bool IsLessEq(const T1 &v1, const T2 &v2) { return TestLessEq<true,true,T1,T2>(v1,v2); }
 
 
 template<typename T1, typename T2>
-bool IsEq(const T1 &v1, const T2 &v2) { return TestLessEq<false,true,T1,T2>(v1,v2); }
+inline bool IsGreater(const T1 &v1, const T2 &v2) { return TestLessEq<true,false,T2,T1>(v2,v1); }
 
 template<typename T1, typename T2>
-bool IsNotEq(const T1 &v1, const T2 &v2) { return TestLessEq<false,false,T1,T2>(v1,v2); }
-
-template<typename T1, typename T2>
-bool IsLess(const T1 &v1, const T2 &v2) { return TestLessEq<true,false,T1,T2>(v1,v2); }
-
-template<typename T1, typename T2>
-bool IsLessEq(const T1 &v1, const T2 &v2) { return TestLessEq<true,true,T1,T2>(v1,v2); }
-
-
-template<typename T1, typename T2>
-bool IsGreater(const T1 &v1, const T2 &v2) { return TestLessEq<true,false,T2,T1>(v2,v1); }
-
-template<typename T1, typename T2>
-bool IsGreaterEq(const T1 &v1, const T2 &v2) { return TestLessEq<true,true,T2,T1>(v2,v1); }
+inline bool IsGreaterEq(const T1 &v1, const T2 &v2) { return TestLessEq<true,true,T2,T1>(v2,v1); }
 
 
 }
