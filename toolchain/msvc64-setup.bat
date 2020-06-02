@@ -21,6 +21,7 @@ setlocal enabledelayedexpansion
 	)
 	@if exist "!InstallDir!\Common7\Tools\VsDevCmd.bat" (
 		@call "!InstallDir!\Common7\Tools\VsDevCmd.bat" -arch=amd64 -app_platform=Desktop -no_logo
+		@echo HXCPP_VARS
 		@set
 	) else (
 		echo Warning: Could not find Visual Studio VsDevCmd
