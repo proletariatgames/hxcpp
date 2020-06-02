@@ -8,8 +8,16 @@ setlocal enabledelayedexpansion
 	@echo HXCPP_VARS
 	@set
 ) else if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" (
-	for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
-		@set InstallDir=%%i
+	cd /D "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer"
+	if defined HXCPP_MSVC_VERSION (
+		for /f "usebackq tokens=*" %%i in (`vswhere.exe -version "[%HXCPP_MSVC_VERSION%,)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+			@set InstallDir=%%i
+		)
+	)
+	else (
+		for /f "usebackq tokens=*" %%i in (`vswhere.exe -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+			@set InstallDir=%%i
+		)
 	)
 	@if exist "!InstallDir!\Common7\Tools\VsDevCmd.bat" (
 		@call "!InstallDir!\Common7\Tools\VsDevCmd.bat" -arch=x86 -app_platform=Desktop -no_logo
