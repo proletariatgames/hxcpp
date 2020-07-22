@@ -399,7 +399,7 @@ extern void scriptMarkStack(hx::MarkContext *);
 // PROLETARIAT BEGIN - Renato Vogelaar - This is a workaround so we can disable GC on the async load thread in UE4
 //This function is called inside UXGameInstance so the hxcpp´s GC runs only in the main thread
 DECLARE_FAST_TLS_DATA(int, tlsGCEnabled);
-bool gcFilterThreads;
+static bool gcFilterThreads = false;
 extern "C"
 {
    void hxcpp_enable_gc_thread_filtering()
