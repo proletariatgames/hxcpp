@@ -3358,7 +3358,14 @@ public:
          }
       if (gid<0)
       {
-         if (!gAllocGroups.safeReserveExtra(1))
+         /**
+            Proletariat - Renato: Added "!outForceCompact"
+            Reason: Because the changes to skip GC calls on different threads, the "collect" function doesn´t do anything inside the the "GetFreeBlock" function for filtered threads.
+            This causes unwanted early returns on this function that ends up causing "Memory exhausted" errors.
+            So in those cases, when we get to the last "AllocMoreBlocks" call on "GetFreeBlock" function, we don´t want it to return before calling HxAllocGCBlock.
+            Since "outForceCompact" is allways true the last time this function is called inside the "GetFreeBlock", we use that variable to skip the early returns.
+         **/ 
+         if (!outForceCompact && !gAllocGroups.safeReserveExtra(1))
          {
             outForceCompact = true;
             return false;
@@ -3369,8 +3376,8 @@ public:
 
       int n = 1<<IMMIX_BLOCK_GROUP_BITS;
 
-
-      if (!mAllBlocks.safeReserveExtra(n) || !mFreeBlocks.hasExtraCapacity(n))
+      //Proletariat - Renato: Added "!outForceCompact"
+      if (!outForceCompact && !mAllBlocks.safeReserveExtra(n) || !mFreeBlocks.hasExtraCapacity(n))
       {
          outForceCompact = true;
          return false;
