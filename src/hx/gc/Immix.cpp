@@ -3468,7 +3468,9 @@ public:
          #endif
 
          bool forceCompact = false;
-         if (!result && allowMoreBlocks() && (!sgInternalEnable || GetWorkingMemory()<sWorkingMemorySize))
+         // PROLETARIAT - ogles - added (gcFilterThreads && !((int *)tlsGCEnabled))
+         // This ensures AllocMoreBlocks is called first to find an existing block. If it can't, it will set forceCompact to true, so that the AllocMoreBlocks further below will actually alloc.
+         if (!result && allowMoreBlocks() && (!sgInternalEnable || GetWorkingMemory()<sWorkingMemorySize || (gcFilterThreads && !((int *)tlsGCEnabled))))
          {
             if (AllocMoreBlocks(forceCompact,false))
                result = GetNextFree(inRequiredBytes);
