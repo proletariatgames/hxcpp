@@ -3377,7 +3377,7 @@ public:
       int n = 1<<IMMIX_BLOCK_GROUP_BITS;
 
       //Proletariat - Renato: Added "!outForceCompact"
-      if (!outForceCompact && !mAllBlocks.safeReserveExtra(n) || !mFreeBlocks.hasExtraCapacity(n))
+      if (!outForceCompact && (!mAllBlocks.safeReserveExtra(n) || !mFreeBlocks.hasExtraCapacity(n)))
       {
          outForceCompact = true;
          return false;
