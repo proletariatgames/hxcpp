@@ -392,6 +392,10 @@ static void VisitLocalAlloc(LocalAllocator *inAlloc,hx::VisitContext *__inCtx);
 static void WaitForSafe(LocalAllocator *inAlloc);
 static void ReleaseFromSafe(LocalAllocator *inAlloc);
 static void ClearPooledAlloc(LocalAllocator *inAlloc);
+//PROLETARIAT BEGIN - Renato: Fix for external thread allocation
+//Resets the allocators inside the intermediate local allocator list
+static void ResetLocalAllocatorInitializing(LocalAllocator *inAlloc);
+//Proletariat END
 static void CollectFromThisThread(bool inMajor,bool inForceCompact);
 
 namespace hx
@@ -3064,6 +3068,10 @@ public:
       // Until we add ourselves, the colled will not wait
       //  on us - ie, we are assumed ot be in a GC free zone.
       AutoLock lock(*gThreadStateChangeLock);
+      //PROLETARIAT BEGIN - Renato: Fix for external thread allocation
+      //When we add the allocator to the "mLocalAllocs" list, we remove it from our intermediate list
+      mLocalAllocsInitializing.qerase_val(inAlloc);
+      //PROLETARIAT END
       mLocalAllocs.push(inAlloc);
       // TODO Attach debugger
    }
@@ -3092,6 +3100,10 @@ public:
          if (mLocalPool[p])
          {
             LocalAllocator *result = mLocalPool[p];
+            //PROLETARIAT BEGIN - Renato
+            //When we get a new alocator from the pool, add it to the intermediate list until we add it to the "mLocalAllocs" list
+            mLocalAllocsInitializing.push(result);
+            //PROLETARIAT END
             mLocalPool[p] = 0;
             return result;
          }
@@ -4619,6 +4631,42 @@ public:
       // Mark local stacks
       for(int i=0;i<mLocalAllocs.size();i++)
          MarkLocalAlloc(mLocalAllocs[i] , &mMarker);
+      /*
+         PROLETARIAT BEGIN - Renato: Fix for external thread allocation:
+         Problem:
+         When a new thread is registered, a local allocator is taken from a pool of localAllocators (GetPooledAllocator) and is added to the list of 
+         "active" local allocators (mLocalAllocs) through the "AddLocal" function. But there is a lock before the allocator is pushed to the "mLocalAllocs" list.
+         Those local allocators have all the information regarding the memory addresses they are/will use and they reset on the mark step of the GC cycle when collecting.
+         But at the begining of the "collect" function, the GC thread locks the others, so there is a chance that an allocator is removed from the pool "mLocalPool"
+         and not added to the "mLocalAllocs" list until the end of the GC´s collect function, therefore not reseting all the variables inside it, 
+         eventually causing a Immix memory block/lines being shared between multiple allocators, causing a Segmentation Fault.
+         
+
+         |                                                   A                    B                     C                          D
+         |Collector Thread: ----------------------------------------------|-----------------------------|-----------------------|---------------
+         |                                                          Collect(lock)        markAll (reset allocators)           unlock   
+         |    Other Thread:--------|-------------------------|--------------------|------------------------------------------------|---------
+         |                RegisterCurrentThread      GetPooledAllocator         locked(can´t add to the mLocalAllocs)           AddLocal
+
+
+         A: Local Allocator is removed from "mLocalPool"
+         B: GC starts collecting, it locks, and the "addLocal" function waits it to unlock so it can add the pooled allocator to the "mLocalAllocs" list
+         C: On the mark phase, all allocators in "mLocalAllocs" are reset. Note that the pooled allocator is not yet in thet list and is not reset
+         D : When the collector remove the lock, the pooled allocator is added to "mLocalAllocs" list, but is not reset.
+
+         Solution:
+         1.Create a "intermediate" list for the initializing allocators that were not added yet to the "mLocalAllocs" list
+         2.When we reset the "mLocalAllocs" list, we also reset our list, so by the end of the collect function we have all allocators cleared
+         3.When we finally add the allocator o the "mLocalAllocs" list and remove it from the intermediate list.
+
+         This solution was chosen because reseting the allocator from other places could create more problems. Creating a "mLocalAllocsInitializing"
+         list was the least invasive solution.
+
+         Bellow is the step 2 of this solution
+      */
+      for(int i=0;i<mLocalAllocsInitializing.size();i++)
+         ResetLocalAllocatorInitializing(mLocalAllocsInitializing[i])
+      //PROLETARIAT END
 
       #ifdef PROFILE_COLLECT
       hx::localObjects = sObjectMarks;
@@ -5431,6 +5479,10 @@ public:
    LargeList mLargeList;
    HxMutex    mLargeListLock;
    hx::QuickVec<LocalAllocator *> mLocalAllocs;
+   //PROLETARIAT BEGIN - Renato
+   //Create a temporary pool of allocators removed from "mLocalPool" but not yet added to the  "mLocalAllocs"
+   hx::QuickVec<LocalAllocator *> mLocalAllocsInitializing;
+   //PROLETARIAT END
    LocalAllocator *mLocalPool[LOCAL_POOL_SIZE];
    hx::QuickVec<unsigned int *> largeObjectRecycle;
 };
@@ -6199,6 +6251,14 @@ void ClearPooledAlloc(LocalAllocator *inAlloc)
 {
    inAlloc->Reset();
 }
+
+//PROLETARIAT BEGIN - Renato: Fix for external thread allocation
+//Resets the allocators inside the intermediate local allocator list
+void ResetLocalAllocatorInitializing(LocalAllocator *inAlloc)
+{
+   inAlloc->Reset();
+}
+//PROLETARIAT END
 
 #ifdef HXCPP_VISIT_ALLOCS
 void VisitLocalAlloc(LocalAllocator *inAlloc,hx::VisitContext *__inCtx)
