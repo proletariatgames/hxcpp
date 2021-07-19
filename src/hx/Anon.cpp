@@ -172,7 +172,7 @@ hx::Val Anon_obj::__Field(const String &inName, hx::PropertyAccess inCallProp)
 {
 
    #ifdef HX_SMART_STRINGS
-   if (inName.isAsciiEncodedQ())
+   if (inName.isAsciiEncoded())
    #endif
    if (mFixedFields>0)
    {
